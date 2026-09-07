@@ -50,6 +50,9 @@ env:
   NDK_VERSION: "r28c"
   #signing keys env variable checks
   ANDROID_SIGNING_KEY: "${{ secrets.ANDROID_SIGNING_KEY }}"
+  ANDROID_ALIAS: "${{ secrets.ANDROID_ALIAS }}"
+  ANDROID_KEY_STORE_PASSWORD: "${{ secrets.ANDROID_KEY_STORE_PASSWORD }}"
+  ANDROID_KEY_PASSWORD: "${{ secrets.ANDROID_KEY_PASSWORD }}"
   MACOS_P12_BASE64: "${{ secrets.MACOS_P12_BASE64 }}"
   UPLOAD_ARTIFACT: "${{ inputs.upload-artifact }}"
   SIGN_BASE_URL: "${{ secrets.SIGN_BASE_URL }}-2"
@@ -247,7 +250,16 @@ jobs:
           # Increase Gradle JVM memory for CI builds
           sed -i "s/org.gradle.jvmargs=-Xmx1024M/org.gradle.jvmargs=-Xmx2g/g" ./flutter/android/gradle.properties
           # temporary use debug sign config
+          if [ -n "$ANDROID_SIGNING_KEY" ]; then
+            printf '%s' "$ANDROID_SIGNING_KEY" | base64 -d > ./flutter/android/upload.jks
+            printf 'storeFile=upload.jks\nstorePassword=%s\nkeyAlias=%s\nkeyPassword=%s\n' \
+              "$ANDROID_KEY_STORE_PASSWORD" "$ANDROID_ALIAS" "$ANDROID_KEY_PASSWORD" \
+              > ./flutter/android/key.properties
+            echo "🔑 key.properties u shkrua — nënshkrim i vërtetë"
+          else
+            echo "⚠️ pa sekret: kthehem te çelësi debug"
           sed -i "s/signingConfigs.release/signingConfigs.debug/g" ./flutter/android/app/build.gradle
+          fi
           case ${{ matrix.job.target }} in
             aarch64-linux-android)
               mkdir -p ./flutter/android/app/src/main/jniLibs/arm64-v8a
@@ -257,6 +269,9 @@ jobs:
               pushd flutter
               flutter build apk "--${{ matrix.job.reltype }}" --target-platform android-arm64 --split-per-abi
               mv build/app/outputs/flutter-apk/app-arm64-v8a-${{ matrix.job.reltype }}.apk ../rustdesk-${{ env.VERSION }}-${{ matrix.job.arch }}${{ matrix.job.suffix }}.apk
+              flutter build appbundle "--${{ matrix.job.reltype }}" --target-platform android-arm64
+              mv build/app/outputs/bundle/${{ matrix.job.reltype }}/app-${{ matrix.job.reltype }}.aab \
+                 ../spacedesk-${{ env.VERSION }}-${{ matrix.job.arch }}.aab
             ;;
             armv7-linux-androideabi)
               mkdir -p ./flutter/android/app/src/main/jniLibs/armeabi-v7a
@@ -289,6 +304,8 @@ jobs:
           popd
           mkdir -p signed-apk; pushd signed-apk
           mv ../rustdesk-${{ env.VERSION }}-${{ matrix.job.arch }}${{ matrix.job.suffix }}.apk .
+          popd
+          mkdir -p aab && mv spacedesk-*.aab aab/
 
       # https://github.com/r0adkll/sign-android-release/issues/84#issuecomment-1889636075
       - name: Setup sign tool version variable
@@ -333,7 +350,7 @@ jobs:
       - name: Upload unsigned APK (SpaceDesk)
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
-          name: spacedesk-${{ env.VERSION }}-${{ matrix.job.arch }}-unsigned
+          name: spacedesk-${{ env.VERSION }}-${{ matrix.job.arch }}-apk
           path: signed-apk/*.apk
           if-no-files-found: error
 
@@ -346,3 +363,11 @@ jobs:
           tag_name: ${{ env.TAG_NAME }}
           files: |
             signed-apk/rustdesk-${{ env.VERSION }}-${{ matrix.job.arch }}.apk
+
+      - name: Upload AAB (SpaceDesk)
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: spacedesk-${{ env.VERSION }}-${{ matrix.job.arch }}-aab
+          path: aab/*.aab
+          if-no-files-found: error
+
