@@ -251,9 +251,10 @@ jobs:
           sed -i "s/org.gradle.jvmargs=-Xmx1024M/org.gradle.jvmargs=-Xmx2g/g" ./flutter/android/gradle.properties
           # temporary use debug sign config
           if [ -n "$ANDROID_SIGNING_KEY" ]; then
-            printf '%s' "$ANDROID_SIGNING_KEY" | base64 -d > ./flutter/android/upload.jks
-            printf 'storeFile=upload.jks\nstorePassword=%s\nkeyAlias=%s\nkeyPassword=%s\n' \
-              "$ANDROID_KEY_STORE_PASSWORD" "$ANDROID_ALIAS" "$ANDROID_KEY_PASSWORD" \
+            CELESI="$(pwd)/flutter/android/upload.jks"
+            printf '%s' "$ANDROID_SIGNING_KEY" | base64 -d > "$CELESI"
+            printf 'storeFile=%s\nstorePassword=%s\nkeyAlias=%s\nkeyPassword=%s\n' \
+              "$CELESI" "$ANDROID_KEY_STORE_PASSWORD" "$ANDROID_ALIAS" "$ANDROID_KEY_PASSWORD" \
               > ./flutter/android/key.properties
             echo "🔑 key.properties u shkrua — nënshkrim i vërtetë"
           else
