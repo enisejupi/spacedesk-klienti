@@ -384,7 +384,7 @@ jobs:
           set -eux
           sudo apt-get update -y
           sudo apt-get install -y \
-            xvfb x11-utils xdotool imagemagick \
+            xvfb x11-utils xdotool imagemagick tesseract-ocr \
             libegl1 libgl1 libgles2 libgl1-mesa-dri libglu1-mesa mesa-utils \
             dbus-x11 at-spi2-core libayatana-appindicator3-1 || true
           sudo apt-get install -y ./rustdesk-${{ env.VERSION }}-${{ matrix.job.arch }}.deb \
@@ -403,10 +403,9 @@ jobs:
           "$BIN" > pamjet/app.log 2>&1 &
           sleep 25
 
-          # 🚨 Dritarja, JO rrënja. Xhirimi i mëparshëm kapte `-window root`:
-          #    dritarja e app-it ishte ~1080×800 te një rrënjë 1080×1920, pra
-          #    58% e çdo pamjeje ishte E ZEZË — dhe roja e ngjyrave e kaloi,
-          #    sepse 598 ngjyra te pjesa e sipërme mjaftojnë.
+          # 🚨 Dritarja, JO rrënja. Xhirimi 34456576357 kapte `-window root`:
+          #    dritarja ishte ~1080×800 te një rrënjë 1080×1920, pra 58% e çdo
+          #    pamjeje ishte E ZEZË — dhe roja e ngjyrave e kalonte.
           WID=""
           for i in $(seq 1 20); do
             WID=$(xdotool search --onlyvisible --name . 2>/dev/null | tail -1)
@@ -421,61 +420,91 @@ jobs:
           xdotool getwindowname "$WID" | tee pamjet/dritaret.txt
           xdotool getwindowgeometry "$WID" | tee -a pamjet/dritaret.txt
 
-          kap() {   # kap <emri>
-            sleep 6
-            import -window "$WID" "pamjet/$1.png"
-            echo "  kapur: $1 -> $(identify -format '%wx%h %k ngjyra' "pamjet/$1.png")"
+          kap() { sleep 5; import -window "$WID" "pamjet/$1.png"; }
+
+          # 🚨 Koordinatat e shiritit të poshtëm NUK hamendësohen. Xhirimi
+          #    34473934978 klikoi te y=1850 dhe pamja 2 doli byte për byte e
+          #    njëjtë me 1 — klikimi ra mbi trupin bosh, pak mbi shiritin, dhe
+          #    asgjë nuk e tha. Një cikël hetimi kushton sekonda; një xhirim i
+          #    ri kushton një orë.
+          kliko_derisa_ndryshon() {   # $1=emri  $2=x  $3=pamja e referencës
+            for y in 1888 1900 1860 1840 1820; do
+              xdotool mousemove "$2" "$y" click 1 || true
+              kap "$1"
+              if ! cmp -s "pamjet/$1.png" "$3"; then
+                echo "  ✅ $1 ndryshoi te y=$y"
+                return 0
+              fi
+              echo "  · $1: y=$y nuk ndryshoi asgjë"
+            done
+            echo "  ⚠️ $1 nuk ndryshoi te asnjë y i provuar"
+            return 1
           }
 
-          # Tri ekrane të NDRYSHME. Xhirimi i mëparshëm kapte pesë herë të
-          # njëjtin ekran — pesë skedarë byte për byte identikë, kurse Play-i
-          # kërkon dy pamje të ndryshme.
           kap 1-lidhja
-          # Skeda «Settings» te shiriti i poshtëm: ~3/4 e gjerësisë, fundi.
-          xdotool mousemove 810 1850 click 1 || true
-          kap 2-cilesimet
-          xdotool mousemove 270 1850 click 1 || true   # kthehu te «Connection»
-          xdotool mousemove 540 130  click 1 || true   # fusha «Remote ID»
-          xdotool type --delay 120 "123456789"  || true
+          kliko_derisa_ndryshon 2-cilesimet 808 pamjet/1-lidhja.png || true
+          xdotool mousemove 269 1888 click 1 || true    # kthehu te «Connection»
+          sleep 3
+          xdotool mousemove 540 120 click 1 || true     # fusha «Remote ID»
+          xdotool type --delay 120 "123456789" || true
           kap 3-id-ja
 
           ls -la pamjet
           tail -40 pamjet/app.log || true
 
           # ─────────────────────────── ROJA ───────────────────────────
-          # 🚨 Roja e vjetër mati vetëm numrin e ngjyrave dhe praninë e një
-          #    dritareje. Të dyja kaluan mbi një pamje 58% të zezë, me markën e
-          #    gabuar, të përsëritur pesë herë. Tani maten të KATËR gjërat që
-          #    dështuan vërtet.
+          # 🚨 Roja e xhirimit të kaluar mati EMRIN E DRITARES si provë të markës.
+          #    Ai është gabim: titulli GTK vjen nga `linux/my_application.cc` dhe
+          #    mbetet «rustdesk», kurse `APP_NAME` shfaqet BRENDA pamjes. Roja ra
+          #    mbi një ndërtim krejt të saktë. Matet ajo që sheh njeriu: pikselët.
           gabime=0
+          sudo apt-get install -y tesseract-ocr >/dev/null 2>&1 || true
 
-          # ① Marka. Kjo është matja që e kap defektin e vërtetë: emri i
-          #    dritares vjen nga APP_NAME.
-          if ! grep -qi "spacedesk" pamjet/dritaret.txt; then
-            echo "⛔ ① emri i dritares nuk përmban «SpaceDesk»:"; cat pamjet/dritaret.txt
+          for f in pamjet/[0-9]-*.png; do
+            wh=$(identify -format "%wx%h" "$f")
+            k=$(identify -format "%k" "$f"); mes=$(identify -format "%[fx:mean]" "$f")
+            echo "   $f -> $wh, $k ngjyra, ndriçim mesatar $mes"
+            [ "$wh" = "1080x1920" ] || { echo "⛔ $f është $wh, jo 1080x1920"; gabime=$((gabime+1)); }
+            [ "$k" -ge 16 ] || { echo "⛔ $f praktikisht bosh ($k ngjyra)"; gabime=$((gabime+1)); }
+            awk -v m="$mes" 'BEGIN{ exit (m > 0.10) ? 0 : 1 }' \
+              || { echo "⛔ $f është pothuaj krejt e errët (mesatarja $mes)"; gabime=$((gabime+1)); }
+          done
+
+          # ① Marka, e lexuar NGA PIKSELËT e shiritit të sipërm.
+          if command -v tesseract >/dev/null 2>&1; then
+            # `-negate` pa `-threshold`: koka është tekst i BARDHË mbi blu, dhe
+            # threshold-i e hante. Provuar mbi pamjen e vërtetë të xhirimit
+            # 34473934978: varianti me threshold jep «f '\ SpaceDesk», ky jep
+            # «SpaceDesk Remote ID» të pastër.
+            convert pamjet/1-lidhja.png -crop 1080x110+0+0 +repage -colorspace Gray \
+              -negate -resize 200% pamjet/koka.png
+            teksti=$(tesseract pamjet/koka.png - 2>/dev/null | tr -d '\r' | tr -s ' \n' ' ')
+            echo "   OCR i kokës: «$teksti»"
+            echo "$teksti" > pamjet/koka.txt
+            if ! echo "$teksti" | grep -qi "spacedesk"; then
+              echo "⛔ ① koka nuk lexon «SpaceDesk» — APP_NAME nuk mbërriti te ekrani"
+              gabime=$((gabime+1))
+            fi
+            # 🚨 `grep -qi … && { … }` do të kthente 1 te rasti I MIRË (kur
+            #    «RustDesk» NUK gjendet) dhe nën `set -e` do ta vriste hapin
+            #    pikërisht kur gjithçka është në rregull. Prandaj `if`, jo `&&`.
+            if echo "$teksti" | grep -qi "rustdesk"; then
+              echo "⛔ ① koka lexon ende «RustDesk»"
+              gabime=$((gabime+1))
+            fi
+          else
+            echo "⚠️ tesseract mungon — marka NUK u mat te pikselët"
             gabime=$((gabime+1))
           fi
 
-          for f in pamjet/[0-9]-*.png; do
-            # ② Përmasa. Kapja nga dritarja duhet të japë saktësisht 1080×1920.
-            wh=$(identify -format "%wx%h" "$f")
-            [ "$wh" = "1080x1920" ] || { echo "⛔ ② $f është $wh, jo 1080x1920"; gabime=$((gabime+1)); }
-            # ③ Përmbajtja: as bosh, as pothuaj krejt e errët.
-            k=$(identify -format "%k" "$f"); mes=$(identify -format "%[fx:mean]" "$f")
-            echo "   $f -> $wh, $k ngjyra, ndriçim mesatar $mes"
-            [ "$k" -ge 16 ] || { echo "⛔ ③ $f praktikisht bosh ($k ngjyra)"; gabime=$((gabime+1)); }
-            awk -v m="$mes" 'BEGIN{ exit (m > 0.10) ? 0 : 1 }' \
-              || { echo "⛔ ③ $f është pothuaj krejt e errët (mesatarja $mes)"; gabime=$((gabime+1)); }
-          done
-
-          # ④ Ndryshueshmëria. Play-i do DY pamje të ndryshme; pesë kopje të së
-          #    njëjtës janë një pamje.
+          # ② Ndryshueshmëria. Play-i do DY pamje të ndryshme.
           ndryshe=$(md5sum pamjet/[0-9]-*.png | awk '{print $1}' | sort -u | wc -l)
           echo "   pamje të ndryshme: $ndryshe"
-          [ "$ndryshe" -ge 2 ] || { echo "⛔ ④ të gjitha pamjet janë identike"; gabime=$((gabime+1)); }
+          [ "$ndryshe" -ge 2 ] || { echo "⛔ ② të gjitha pamjet janë identike"; gabime=$((gabime+1)); }
 
           [ "$gabime" -eq 0 ] || { echo "⛔ $gabime kontrolle ranë — artefakti NUK ngarkohet te Play"; exit 1; }
-          echo "✅ $ndryshe pamje 1080×1920, me markë, me përmbajtje"
+          echo "✅ $ndryshe pamje 1080×1920, me markën e lexuar te pikselët"
+
 
 
       - name: Ngarko pamjet
