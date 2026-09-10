@@ -110,6 +110,24 @@ jobs:
           echo "── pas ──"; grep -n 'isDesktop_' "$F"
           grep -q '^final isDesktop_ = false;' "$F" || { echo "⛔ arnimi nuk zuri vend"; exit 1; }
 
+      # 🏷️🚨 MARKA. Deri më 10-09-2026 ky tubacion ndërtonte PA markë, dhe
+      # pamjet dilnin me «RustDesk» te shiriti i sipërm — pra do të ngarkoheshin
+      # te një listim me emrin SpaceDesk. Pikërisht kategoria «metadata që nuk
+      # përputhet me app-in», e njëjta që rrëzoi Hartën.
+      # `spacecode/marka.py` është i NJËJTI skedar që xhiron edhe te Ampere;
+      # bie me dalje 1 nëse rrjedha kryesore ndryshon ndonjë nga modelet e tij.
+      - name: Ngul marken SpaceDesk
+        env:
+          SPACEDESK_RRENJA: ${{ github.workspace }}
+        run: |
+          python3 spacecode/marka.py
+          echo "── verifikim i pavarur ──"
+          grep -n 'APP_NAME: RwLock' libs/hbb_common/src/config.rs
+          grep -q 'RwLock::new("SpaceDesk".to_owned())' libs/hbb_common/src/config.rs \
+            || { echo "⛔ APP_NAME nuk u ngul"; exit 1; }
+          grep -q 'RENDEZVOUS_SERVERS: &\[&str\] = &\["desk.spacecode.tech"\]' libs/hbb_common/src/config.rs \
+            || { echo "⛔ serveri nuk u ngul"; exit 1; }
+
       - name: Set Swap Space
         if: ${{ matrix.job.arch == 'x86_64' }}
         uses: pierotofy/set-swap-space@49819abfb41bd9b44fb781159c033dba90353a7c # v1.0
@@ -383,35 +401,82 @@ jobs:
           BIN="$(command -v rustdesk || command -v spacedesk || echo /usr/bin/rustdesk)"
           echo "binari: $BIN"
           "$BIN" > pamjet/app.log 2>&1 &
-          # 🚨 Kapja e parë hidhet gjithmonë: dritarja e parë është ende bosh
-          #    ([[pamjet-godot-me-koordinata]]).
-          for t in 1 2 3 4 5; do
-            sleep 12
-            import -window root "pamjet/kapja-$t.png" || true
-            xdotool search --onlyvisible --name . getwindowname %@ \
-              >> pamjet/dritaret.txt 2>&1 || true
+          sleep 25
+
+          # 🚨 Dritarja, JO rrënja. Xhirimi i mëparshëm kapte `-window root`:
+          #    dritarja e app-it ishte ~1080×800 te një rrënjë 1080×1920, pra
+          #    58% e çdo pamjeje ishte E ZEZË — dhe roja e ngjyrave e kaloi,
+          #    sepse 598 ngjyra te pjesa e sipërme mjaftojnë.
+          WID=""
+          for i in $(seq 1 20); do
+            WID=$(xdotool search --onlyvisible --name . 2>/dev/null | tail -1)
+            [ -n "$WID" ] && break
+            sleep 3
           done
+          [ -n "$WID" ] || { echo "⛔ asnjë dritare e dukshme"; tail -40 pamjet/app.log; exit 1; }
+          xdotool windowsize  "$WID" 1080 1920
+          xdotool windowmove  "$WID" 0 0
+          xdotool windowactivate "$WID" || true
+          sleep 6
+          xdotool getwindowname "$WID" | tee pamjet/dritaret.txt
+          xdotool getwindowgeometry "$WID" | tee -a pamjet/dritaret.txt
+
+          kap() {   # kap <emri>
+            sleep 6
+            import -window "$WID" "pamjet/$1.png"
+            echo "  kapur: $1 -> $(identify -format '%wx%h %k ngjyra' "pamjet/$1.png")"
+          }
+
+          # Tri ekrane të NDRYSHME. Xhirimi i mëparshëm kapte pesë herë të
+          # njëjtin ekran — pesë skedarë byte për byte identikë, kurse Play-i
+          # kërkon dy pamje të ndryshme.
+          kap 1-lidhja
+          # Skeda «Settings» te shiriti i poshtëm: ~3/4 e gjerësisë, fundi.
+          xdotool mousemove 810 1850 click 1 || true
+          kap 2-cilesimet
+          xdotool mousemove 270 1850 click 1 || true   # kthehu te «Connection»
+          xdotool mousemove 540 130  click 1 || true   # fusha «Remote ID»
+          xdotool type --delay 120 "123456789"  || true
+          kap 3-id-ja
+
           ls -la pamjet
           tail -40 pamjet/app.log || true
 
-          # 🛡️ ROJA. Një PNG me NJË ngjyrë të vetme është ekran bosh, dhe pesë
-          #    të tillë janë pikërisht dështimi i xhirimit të parë — që kaloi si
-          #    sukses. `%k` = numri i ngjyrave unike.
-          NGJYRA_MAX=0
-          for f in pamjet/kapja-*.png; do
-            k=$(identify -format "%k" "$f" 2>/dev/null || echo 0)
-            echo "$f -> $k ngjyra"
-            [ "$k" -gt "$NGJYRA_MAX" ] && NGJYRA_MAX=$k
+          # ─────────────────────────── ROJA ───────────────────────────
+          # 🚨 Roja e vjetër mati vetëm numrin e ngjyrave dhe praninë e një
+          #    dritareje. Të dyja kaluan mbi një pamje 58% të zezë, me markën e
+          #    gabuar, të përsëritur pesë herë. Tani maten të KATËR gjërat që
+          #    dështuan vërtet.
+          gabime=0
+
+          # ① Marka. Kjo është matja që e kap defektin e vërtetë: emri i
+          #    dritares vjen nga APP_NAME.
+          if ! grep -qi "spacedesk" pamjet/dritaret.txt; then
+            echo "⛔ ① emri i dritares nuk përmban «SpaceDesk»:"; cat pamjet/dritaret.txt
+            gabime=$((gabime+1))
+          fi
+
+          for f in pamjet/[0-9]-*.png; do
+            # ② Përmasa. Kapja nga dritarja duhet të japë saktësisht 1080×1920.
+            wh=$(identify -format "%wx%h" "$f")
+            [ "$wh" = "1080x1920" ] || { echo "⛔ ② $f është $wh, jo 1080x1920"; gabime=$((gabime+1)); }
+            # ③ Përmbajtja: as bosh, as pothuaj krejt e errët.
+            k=$(identify -format "%k" "$f"); mes=$(identify -format "%[fx:mean]" "$f")
+            echo "   $f -> $wh, $k ngjyra, ndriçim mesatar $mes"
+            [ "$k" -ge 16 ] || { echo "⛔ ③ $f praktikisht bosh ($k ngjyra)"; gabime=$((gabime+1)); }
+            awk -v m="$mes" 'BEGIN{ exit (m > 0.10) ? 0 : 1 }' \
+              || { echo "⛔ ③ $f është pothuaj krejt e errët (mesatarja $mes)"; gabime=$((gabime+1)); }
           done
-          if [ "$NGJYRA_MAX" -lt 16 ]; then
-            echo "⛔ ÇDO pamje është praktikisht bosh (max $NGJYRA_MAX ngjyra)."
-            echo "   App-i nuk vizatoi asgjë — shih pamjet/app.log më sipër."
-            exit 1
-          fi
-          if [ ! -s pamjet/dritaret.txt ]; then
-            echo "⛔ asnjë dritare e dukshme — app-i nuk u hap"; exit 1
-          fi
-          echo "✅ pamjet kanë përmbajtje (max $NGJYRA_MAX ngjyra)"
+
+          # ④ Ndryshueshmëria. Play-i do DY pamje të ndryshme; pesë kopje të së
+          #    njëjtës janë një pamje.
+          ndryshe=$(md5sum pamjet/[0-9]-*.png | awk '{print $1}' | sort -u | wc -l)
+          echo "   pamje të ndryshme: $ndryshe"
+          [ "$ndryshe" -ge 2 ] || { echo "⛔ ④ të gjitha pamjet janë identike"; gabime=$((gabime+1)); }
+
+          [ "$gabime" -eq 0 ] || { echo "⛔ $gabime kontrolle ranë — artefakti NUK ngarkohet te Play"; exit 1; }
+          echo "✅ $ndryshe pamje 1080×1920, me markë, me përmbajtje"
+
 
       - name: Ngarko pamjet
         if: always()
