@@ -134,6 +134,18 @@ jobs:
         with:
           submodules: recursive
 
+      - name: Ngul marken SpaceDesk
+        env:
+          SPACEDESK_RRENJA: ${{ github.workspace }}
+        run: |
+          python3 spacecode/marka.py
+          echo "── verifikim i pavarur ──"
+          grep -n 'APP_NAME: RwLock' libs/hbb_common/src/config.rs
+          grep -q 'RwLock::new("SpaceDesk".to_owned())' libs/hbb_common/src/config.rs \
+            || { echo "⛔ APP_NAME nuk u ngul — app-i do te shkruante RustDesk brenda vetes"; exit 1; }
+          grep -q 'RENDEZVOUS_SERVERS: &\[&str\] = &\["desk.spacecode.tech"\]' libs/hbb_common/src/config.rs \
+            || { echo "⛔ serveri nuk u ngul — app-i do te fliste me rs-ny.rustdesk.com"; exit 1; }
+
       - name: Install flutter
         uses: subosito/flutter-action@1a449444c387b1966244ae4d4f8c696479add0b2 # v2
         with:
