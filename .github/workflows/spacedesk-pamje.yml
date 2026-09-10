@@ -354,16 +354,31 @@ jobs:
 
       # 🖼️ Kapja. App-i xhiron te një ekran 1080×1920 (raport telefoni), dhe
       # pamjet merren nga VETË app-i — jo nga shfletuesi, se ky s'është faqe web.
+      #
+      # 🚨 XHIRIMI I PARË (34453392902) DOLI I GJELBËR ME PESË PAMJE BOSHE prej
+      #    407 bajtësh. Shkaku te `app.log`: «Couldn't open libEGL.so.1».
+      #    Flutter-i Linux vizaton me GL/EGL; runner-i i GitHub-it nuk i ka, dhe
+      #    Xvfb-ja pa GLX nuk jep as llvmpipe. App-i nuk hapi kurrë dritare,
+      #    `import -window root` kapi ekranin bosh, dhe `|| true` e fshehu.
+      #    Prandaj tani: bibliotekat GL, `+extension GLX`, dhe një ROJË në fund.
       - name: Kap pamjet nen Xvfb
         run: |
-          set -x
+          set -eux
           sudo apt-get update -y
-          sudo apt-get install -y xvfb x11-utils xdotool imagemagick
+          sudo apt-get install -y \
+            xvfb x11-utils xdotool imagemagick \
+            libegl1 libgl1 libgles2 libgl1-mesa-dri libglu1-mesa mesa-utils \
+            dbus-x11 at-spi2-core libayatana-appindicator3-1 || true
           sudo apt-get install -y ./rustdesk-${{ env.VERSION }}-${{ matrix.job.arch }}.deb \
             || sudo apt-get -f install -y
           export DISPLAY=:99
-          Xvfb :99 -screen 0 1080x1920x24 -nolisten tcp &
+          # llvmpipe: pa GPU, vizatimi bëhet te CPU-ja. Pa këtë, EGL-ja bie sërish.
+          export LIBGL_ALWAYS_SOFTWARE=1
+          export GALLIUM_DRIVER=llvmpipe
+          export GDK_BACKEND=x11
+          Xvfb :99 -screen 0 1080x1920x24 +extension GLX +render -nolisten tcp &
           for i in $(seq 1 30); do xdpyinfo -display :99 >/dev/null 2>&1 && break; sleep 1; done
+          glxinfo -B 2>&1 | head -5 || true
           mkdir -p pamjet
           BIN="$(command -v rustdesk || command -v spacedesk || echo /usr/bin/rustdesk)"
           echo "binari: $BIN"
@@ -372,13 +387,31 @@ jobs:
           #    ([[pamjet-godot-me-koordinata]]).
           for t in 1 2 3 4 5; do
             sleep 12
-            import -window root "pamjet/kapja-$t.png" 2>/dev/null \
-              || (xwd -root | convert xwd:- "pamjet/kapja-$t.png") || true
+            import -window root "pamjet/kapja-$t.png" || true
             xdotool search --onlyvisible --name . getwindowname %@ \
               >> pamjet/dritaret.txt 2>&1 || true
           done
           ls -la pamjet
-          tail -50 pamjet/app.log || true
+          tail -40 pamjet/app.log || true
+
+          # 🛡️ ROJA. Një PNG me NJË ngjyrë të vetme është ekran bosh, dhe pesë
+          #    të tillë janë pikërisht dështimi i xhirimit të parë — që kaloi si
+          #    sukses. `%k` = numri i ngjyrave unike.
+          NGJYRA_MAX=0
+          for f in pamjet/kapja-*.png; do
+            k=$(identify -format "%k" "$f" 2>/dev/null || echo 0)
+            echo "$f -> $k ngjyra"
+            [ "$k" -gt "$NGJYRA_MAX" ] && NGJYRA_MAX=$k
+          done
+          if [ "$NGJYRA_MAX" -lt 16 ]; then
+            echo "⛔ ÇDO pamje është praktikisht bosh (max $NGJYRA_MAX ngjyra)."
+            echo "   App-i nuk vizatoi asgjë — shih pamjet/app.log më sipër."
+            exit 1
+          fi
+          if [ ! -s pamjet/dritaret.txt ]; then
+            echo "⛔ asnjë dritare e dukshme — app-i nuk u hap"; exit 1
+          fi
+          echo "✅ pamjet kanë përmbajtje (max $NGJYRA_MAX ngjyra)"
 
       - name: Ngarko pamjet
         if: always()
