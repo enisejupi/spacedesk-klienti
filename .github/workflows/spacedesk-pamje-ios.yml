@@ -252,6 +252,12 @@ jobs:
           echo "platform 7: $(grep -c "platform 7" /tmp/ol.txt) · platform 2: $(grep -c "platform 2$" /tmp/ol.txt || true)"
           ! grep -q LC_VERSION_MIN_IPHONEOS /tmp/ol.txt || { echo "⛔ mbetën VERSION_MIN"; exit 1; }
           ! grep -q "platform 2$" /tmp/ol.txt || { echo "⛔ mbetën objekte iOS"; exit 1; }
+          # Diagnoza (17-10): a i sheh ld-ja simbolet Rust te arkivi i shndërruar?
+          nm -gU "$A" 2>/dev/null | grep -E " T _(drop_dart_object|wire_cm_can_elevate)$" || echo "⚠️ simbolet Rust s'janë te tabela"
+          echo 'extern void drop_dart_object(void*); int main(void){drop_dart_object(0);return 0;}' > /tmp/t.c
+          xcrun --sdk iphonesimulator clang -target arm64-apple-ios13.0-simulator /tmp/t.c "$A" -o /tmp/t \
+            -Wl,-undefined,dynamic_lookup 2>&1 | grep -v "^ld: warning: object file" | head -20 || true
+          nm /tmp/t 2>/dev/null | grep drop_dart_object || echo "⚠️ lidhja-provë s'u krijua"
           lipo -info "$A"
 
           
