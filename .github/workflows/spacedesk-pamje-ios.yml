@@ -266,7 +266,12 @@ jobs:
         run: |
           set -e
           cd flutter
-          flutter build ios --simulator --debug --no-codesign
+          # Lib-i Rust është vetëm arm64: x86_64 jashtë edhe te xcconfig-et (jo vetëm te pbxproj).
+          for c in ios/Flutter/Debug.xcconfig ios/Flutter/Release.xcconfig; do
+            echo 'EXCLUDED_ARCHS[sdk=iphonesimulator*]=x86_64' >> "$c"; done
+          flutter build ios --simulator --debug --no-codesign -v > /tmp/fb.log 2>&1 || {
+            grep -n "Undefined symbols for architecture\|ld: \|-target \|liblibrustdesk\|referenced from" /tmp/fb.log | head -60
+            tail -30 /tmp/fb.log; exit 1; }
           echo "APP_PATH=$PWD/build/ios/iphonesimulator/Runner.app" >> "$GITHUB_ENV"
 
       - name: Kap pamjet
