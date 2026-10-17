@@ -167,39 +167,91 @@ jobs:
           rustup target add ${{ matrix.job.target }}
           cargo build --locked --features flutter --release --target aarch64-apple-ios --lib
           A=target/aarch64-apple-ios/release/liblibrustdesk.a
-          python3 - "$A" <<'EOF'
-          # Arkivi BSD (ar) → çdo anëtar Mach-O 64 → LC_BUILD_VERSION.platform 2 (iOS) → 7 (simulator).
-          # Në vend, pa ndryshuar asnjë madhësi: tabela e simboleve dhe zhvendosjet mbeten të vlefshme.
-          import struct, sys
-          f = sys.argv[1]; b = bytearray(open(f, "rb").read())
+          rm -rf /tmp/sim && python3 - "$A" /tmp/sim <<'EOF'
+          # Arkivi ar → çdo anëtar Mach-O 64 shënohet «iOS-simulator» (platforma 7), si arm64-to-sim:
+          #  · LC_BUILD_VERSION: platforma 2 → 7, në vend;
+          #  · LC_VERSION_MIN_IPHONEOS (16 B) → LC_BUILD_VERSION (24 B): të dhënat pas komandave
+          #    zhvendosen +8, dhe çdo offset skedari (segmentet, seksionet, relokimet, simbolet,
+          #    linkedit) +8. Pastaj arkivi rindërtohet me libtool (tabela e simboleve e re).
+          import os, struct, sys
+          f, D = sys.argv[1], sys.argv[2]
+          b = open(f, "rb").read()
           assert b[:8] == b"!<arch>\n", "s'është arkiv ar"
-          i, ndr, vjeter, tjeter = 8, 0, 0, 0
+          LINKEDIT = (0x26, 0x29, 0x2E, 0x1E, 0x2B, 0x33, 0x34)   # linkedit_data_command: dataoff te +8
+
+          def sim(m):
+              m = bytearray(m)
+              if struct.unpack_from("<I", m, 0)[0] != 0xFEEDFACF:
+                  return bytes(m), "tjeter"
+              ncmds, sz = struct.unpack_from("<II", m, 16)
+              c, vm = 32, None
+              for _ in range(ncmds):
+                  cmd, size = struct.unpack_from("<II", m, c)
+                  if cmd == 0x32:
+                      if struct.unpack_from("<I", m, c + 8)[0] == 2:
+                          struct.pack_into("<I", m, c + 8, 7)
+                      return bytes(m), "ndrequr"
+                  if cmd == 0x25:
+                      vm = (c, size)
+                  c += size
+              if vm is None:
+                  return bytes(m), "pa-version"
+              vc, vsize = vm
+              minos, sdk = struct.unpack_from("<II", m, vc + 8)
+              S, kufi = 24 - vsize, 32 + sz
+              c = 32
+              for _ in range(ncmds):
+                  cmd, size = struct.unpack_from("<II", m, c)
+                  def zh(off, w="<I"):
+                      v = struct.unpack_from(w, m, c + off)[0]
+                      if v >= kufi:
+                          struct.pack_into(w, m, c + off, v + S)
+                  if cmd == 0x19:                                   # LC_SEGMENT_64
+                      if struct.unpack_from("<Q", m, c + 48)[0]:    # filesize
+                          zh(40, "<Q")
+                      for s in range(struct.unpack_from("<I", m, c + 64)[0]):
+                          o = c + 72 + 80 * s
+                          for off in (48, 56):                      # offset, reloff
+                              v = struct.unpack_from("<I", m, o + off)[0]
+                              if v >= kufi:
+                                  struct.pack_into("<I", m, o + off, v + S)
+                  elif cmd == 0x2:                                  # LC_SYMTAB
+                      zh(8); zh(16)
+                  elif cmd == 0xB:                                  # LC_DYSYMTAB
+                      for off in (32, 40, 48, 56, 64, 72):
+                          zh(off)
+                  elif cmd in LINKEDIT:
+                      zh(8)
+                  c += size
+              bv = struct.pack("<IIIIII", 0x32, 24, 7, minos, sdk, 0)
+              out = m[:vc] + bv + m[vc + vsize:kufi] + m[kufi:]
+              struct.pack_into("<I", out, 20, sz + S)
+              return bytes(out), "zgjeruar"
+
+          os.makedirs(D)
+          i, n, num = 8, 0, {}
           while i + 60 <= len(b):
               emri = b[i:i+16].decode("ascii", "replace").strip()
-              sa = int(b[i+48:i+58].decode().strip()); t = i + 60
+              sa = int(b[i+48:i+58].decode().strip())
+              t, fund = i + 60, i + 60 + sa
               if emri.startswith("#1/"):
-                  t += int(emri[3:])
-              fund = i + 60 + sa
-              if struct.unpack_from("<I", b, t)[0] == 0xFEEDFACF:
-                  ncmds = struct.unpack_from("<I", b, t + 16)[0]; c = t + 32
-                  for _ in range(ncmds):
-                      cmd, size = struct.unpack_from("<II", b, c)
-                      if cmd == 0x32:                     # LC_BUILD_VERSION
-                          pl = struct.unpack_from("<I", b, c + 8)[0]
-                          if pl == 2:
-                              struct.pack_into("<I", b, c + 8, 7); ndr += 1
-                          elif pl != 7:
-                              tjeter += 1
-                      elif cmd == 0x25:                   # LC_VERSION_MIN_IPHONEOS: s'kthehet në vend
-                          vjeter += 1
-                      c += size
+                  k = int(emri[3:]); emri = b[t:t+k].rstrip(b"\0").decode("utf-8", "replace"); t += k
               i = fund + (fund & 1)
-          open(f, "wb").write(b)
-          print("objekte iOS→simulator:", ndr, "· VERSION_MIN:", vjeter, "· platformë tjetër:", tjeter)
-          assert ndr > 0, "asnjë objekt s'u ndërrua"
-          assert vjeter == 0, "objekte me LC_VERSION_MIN_IPHONEOS — linker-i do t'i refuzonte"
+              if emri.startswith("__.SYMDEF") or emri in ("/", "//"):
+                  continue
+              m, gjendja = sim(b[t:fund])
+              num[gjendja] = num.get(gjendja, 0) + 1
+              n += 1
+              open(os.path.join(D, "%06d_%s" % (n, os.path.basename(emri) or "o")), "wb").write(m)
+          print("anëtarë:", n, num)
+          assert num.get("ndrequr", 0) + num.get("zgjeruar", 0) > 0, "asnjë objekt s'u ndërrua"
           EOF
-          ranlib "$A"
+          rm -f "$A" && (cd /tmp/sim && ls | sort > ../lista && xcrun libtool -static -o "$OLDPWD/$A" -filelist ../lista)
+          # Në skedar, jo me tub: `! otool | grep -q` me pipefail kalon nga SIGPIPE edhe kur gjen.
+          otool -l "$A" > /tmp/ol.txt
+          echo "platform 7: $(grep -c "platform 7" /tmp/ol.txt) · platform 2: $(grep -c "platform 2$" /tmp/ol.txt || true)"
+          ! grep -q LC_VERSION_MIN_IPHONEOS /tmp/ol.txt || { echo "⛔ mbetën VERSION_MIN"; exit 1; }
+          ! grep -q "platform 2$" /tmp/ol.txt || { echo "⛔ mbetën objekte iOS"; exit 1; }
           lipo -info "$A"
 
           
