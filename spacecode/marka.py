@@ -711,6 +711,30 @@ if os.path.exists(_pc):
         deshtime.append("%s: is_incoming_only() u prek — modeli kapi shumë" % KONF)
 
 
+# 🕌 Ikonat pa qenie të gjalla (17-10-2026): ekrani bosh «Oops, no recent sessions» tregonte
+# një FYTYRË (sentiment_very_dissatisfied) — dhe ajo doli te pamjet e App Store-it. Syri
+# (visibility) dhe silueta (person) janë po ashtu pjesë trupi/figurë → dry dhe çelës.
+print("9) Ikonat pa fytyrë, sy ose siluetë")
+_IKONAT = [("Icons.sentiment_very_dissatisfied_rounded", "Icons.history_toggle_off_rounded"),
+           ("Icons.visibility_off", "Icons.lock"), ("Icons.visibility", "Icons.lock_open"),
+           ("Icons.person_outline", "Icons.key_outlined"), ("Icons.person", "Icons.key"),
+           ("Icons.account_circle_outlined", "Icons.alternate_email"), ("Icons.group)", "Icons.forum)")]
+for _sk in ["flutter/lib/common/widgets/peers_view.dart", "flutter/lib/common/widgets/address_book.dart",
+            "flutter/lib/common/widgets/dialog.dart", "flutter/lib/common/widgets/peer_card.dart",
+            "flutter/lib/desktop/pages/desktop_setting_page.dart", "flutter/lib/mobile/pages/settings_page.dart",
+            "flutter/lib/desktop/pages/server_page.dart", "flutter/lib/common/widgets/chat_page.dart"]:
+    _p = os.path.join(RRENJA, _sk)
+    if not os.path.exists(_p):
+        deshtime.append("mungon skedari: " + _sk); continue
+    _t = io.open(_p, encoding="utf-8").read(); _f = _t
+    for _v, _r in _IKONAT:
+        _t = _t.replace(_v + "_", "\0" + _v[6:] + "_").replace(_v, _r).replace("\0" + _v[6:] + "_", _v + "_") if _v == "Icons.visibility" else _t.replace(_v, _r)
+    if any(x in _t for x in ("Icons.sentiment_", "Icons.visibility", "Icons.person", "Icons.account_circle", "Icons.group)")):
+        deshtime.append("%s: mbeti një ikonë me fytyrë/sy/siluetë" % _sk)
+    if _t != _f:
+        io.open(_p, "w", encoding="utf-8").write(_t); ndryshime.append(_sk); print("  ✅", _sk)
+
+
 # 🛡️ ROJA. Pa të, çdo model i pagjetur ishte vetëm një rresht ⚠️ dhe skripti
 # dilte 0 — pra ndërtimi vazhdonte me markë gjysmake. Tani ndërtimi BIE këtu.
 if deshtime:
