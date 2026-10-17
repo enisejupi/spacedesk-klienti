@@ -61,9 +61,9 @@ jobs:
         job:
           - {
               arch: aarch64,
-              target: aarch64-apple-ios-sim,
+              target: aarch64-apple-ios,
               os: macos-latest,
-              vcpkg-triplet: arm64-ios-simulator,
+              vcpkg-triplet: arm64-ios,
             }
     steps:
       - name: Export GitHub Actions cache environment variables
@@ -144,14 +144,6 @@ jobs:
           head -n 100 "${VCPKG_ROOT}/buildtrees/ffmpeg/build-${{ matrix.job.vcpkg-triplet }}-rel-out.log" || true
         shell: bash
 
-      - name: Triplet-i i simulatorit me emrin qe pret build.rs
-        run: |
-          set -e
-          ls "$VCPKG_ROOT/installed"
-          rm -rf "$VCPKG_ROOT/installed/arm64-ios"
-          mv "$VCPKG_ROOT/installed/arm64-ios-simulator" "$VCPKG_ROOT/installed/arm64-ios"
-          ls "$VCPKG_ROOT/installed/arm64-ios/lib"
-
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@e97e2d8cc328f1b50210efc529dca0028893a2d9 # v1
         with:
@@ -161,7 +153,7 @@ jobs:
 
       - uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
         with:
-          prefix-key: rustdesk-lib-cache-ios-sim
+          prefix-key: rustdesk-lib-cache-ios
           key: ${{ matrix.job.target }}
 
       - name: Restore bridge files
@@ -170,33 +162,46 @@ jobs:
           name: bridge-artifact
           path: ./
 
-      - name: libsodium per simulatorin
-        run: |
-          set -e
-          curl -fsSL -o /tmp/s.tgz https://download.libsodium.org/libsodium/releases/libsodium-1.0.20.tar.gz
-          mkdir -p /tmp/s && tar -xzf /tmp/s.tgz -C /tmp/s --strip-components=1 && cd /tmp/s
-          SDK=$(xcrun --sdk iphonesimulator --show-sdk-path)
-          export CC="$(xcrun --sdk iphonesimulator -f clang)"
-          export CFLAGS="-O2 -arch arm64 -isysroot $SDK -mios-simulator-version-min=13.0"
-          export LDFLAGS="$CFLAGS"
-          ./configure --host=arm-apple-darwin --disable-shared --enable-static --prefix=/tmp/sodium >/dev/null
-          make -j"$(sysctl -n hw.ncpu)" >/dev/null && make install >/dev/null
-          lipo -info /tmp/sodium/lib/libsodium.a
-
       - name: Build rustdesk lib
         run: |
           rustup target add ${{ matrix.job.target }}
-          export SODIUM_LIB_DIR=/tmp/sodium/lib  # statike si parazgjedhje; SODIUM_STATIC e vret build.rs-në
-          # bindgen-i (coreaudio-sys) ia jep clang-ut triplet-in e Rust-it «aarch64-apple-ios-sim», që clang-u
-          # s'e pranon («version 'sim' … is invalid», xhirimi 38993840117). --target-i i fundit fiton.
-          SDK=$(xcrun --sdk iphonesimulator --show-sdk-path)
-          export BINDGEN_EXTRA_CLANG_ARGS="--target=arm64-apple-ios13.0-simulator -isysroot $SDK"
-          export BINDGEN_EXTRA_CLANG_ARGS_aarch64_apple_ios_sim="$BINDGEN_EXTRA_CLANG_ARGS"
-          ls "$SODIUM_LIB_DIR"/libsodium.a
-          cargo build --locked --features flutter --release --target aarch64-apple-ios-sim --lib
-          mkdir -p target/aarch64-apple-ios/release
-          cp target/aarch64-apple-ios-sim/release/liblibrustdesk.a target/aarch64-apple-ios/release/
-          lipo -info target/aarch64-apple-ios/release/liblibrustdesk.a
+          cargo build --locked --features flutter --release --target aarch64-apple-ios --lib
+          A=target/aarch64-apple-ios/release/liblibrustdesk.a
+          python3 - "$A" <<'EOF'
+          # Arkivi BSD (ar) → çdo anëtar Mach-O 64 → LC_BUILD_VERSION.platform 2 (iOS) → 7 (simulator).
+          # Në vend, pa ndryshuar asnjë madhësi: tabela e simboleve dhe zhvendosjet mbeten të vlefshme.
+          import struct, sys
+          f = sys.argv[1]; b = bytearray(open(f, "rb").read())
+          assert b[:8] == b"!<arch>\n", "s'është arkiv ar"
+          i, ndr, vjeter, tjeter = 8, 0, 0, 0
+          while i + 60 <= len(b):
+              emri = b[i:i+16].decode("ascii", "replace").strip()
+              sa = int(b[i+48:i+58].decode().strip()); t = i + 60
+              if emri.startswith("#1/"):
+                  t += int(emri[3:])
+              fund = i + 60 + sa
+              if struct.unpack_from("<I", b, t)[0] == 0xFEEDFACF:
+                  ncmds = struct.unpack_from("<I", b, t + 16)[0]; c = t + 32
+                  for _ in range(ncmds):
+                      cmd, size = struct.unpack_from("<II", b, c)
+                      if cmd == 0x32:                     # LC_BUILD_VERSION
+                          pl = struct.unpack_from("<I", b, c + 8)[0]
+                          if pl == 2:
+                              struct.pack_into("<I", b, c + 8, 7); ndr += 1
+                          elif pl != 7:
+                              tjeter += 1
+                      elif cmd == 0x25:                   # LC_VERSION_MIN_IPHONEOS: s'kthehet në vend
+                          vjeter += 1
+                      c += size
+              i = fund + (fund & 1)
+          open(f, "wb").write(b)
+          print("objekte iOS→simulator:", ndr, "· VERSION_MIN:", vjeter, "· platformë tjetër:", tjeter)
+          assert ndr > 0, "asnjë objekt s'u ndërrua"
+          assert vjeter == 0, "objekte me LC_VERSION_MIN_IPHONEOS — linker-i do t'i refuzonte"
+          EOF
+          ranlib "$A"
+          lipo -info "$A"
+
           
       - name: Ndertimi per Simulator
         shell: bash
