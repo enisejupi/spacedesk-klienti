@@ -93,15 +93,19 @@ jobs:
           sed -i '' 's/\(IPHONEOS_DEPLOYMENT_TARGET = [0-9.]*;\)/\1 "EXCLUDED_ARCHS[sdk=iphonesimulator*]" = x86_64;/' \
             flutter/ios/Runner.xcodeproj/project.pbxproj
           grep -c 'EXCLUDED_ARCHS\[sdk=iphonesimulator' flutter/ios/Runner.xcodeproj/project.pbxproj
-          # ffmpeg-u vetëm për hwcodec — jashtë
+          # ffmpeg-u vetëm për hwcodec — jashtë. Edhe çdo varësi `host: true` jashtë:
+          # simulatori lidh vetëm bibliotekat e target-it, ndërsa libjpeg-turbo:arm64-osx
+          # binte te runner-i («math cannot parse " * 8"», xhirimi 36124299960, 25-09).
           python3 - <<'EOF'
           import json
           v = json.load(open("vcpkg.json"))
           v["dependencies"] = [d for d in v["dependencies"]
-                               if not (isinstance(d, dict) and d.get("name") == "ffmpeg" and not d.get("host"))]
+                               if not (isinstance(d, dict) and (d.get("host") or d.get("name") == "ffmpeg"))]
           json.dump(v, open("vcpkg.json", "w"), indent=2)
           EOF
-          ! grep -A2 '"ffmpeg"' vcpkg.json | grep -q '"host": false' || { echo "⛔ ffmpeg mbeti"; exit 1; }
+          ! grep -q '"host": true' vcpkg.json || { echo "⛔ varësitë host mbetën"; exit 1; }
+          ! grep -q '"ffmpeg"' vcpkg.json || { echo "⛔ ffmpeg mbeti"; exit 1; }
+          grep -q '"libvpx"' vcpkg.json || { echo "⛔ filtri hoqi edhe target-in"; exit 1; }
 
       - name: Install flutter
         uses: subosito/flutter-action@1a449444c387b1966244ae4d4f8c696479add0b2 # v2
@@ -204,7 +208,7 @@ jobs:
           mkdir -p pamjet
           runtime=$(xcrun simctl list runtimes | grep -oE 'com\.apple\.CoreSimulator\.SimRuntime\.iOS-[0-9-]+' | tail -1)
           URL="rustdesk://${DEMO_ID}?password=${DEMO_PASS}"
-          for pajisja in "iPhone 16 Pro Max" "iPad Pro 13-inch (M4)"; do
+          for pajisja in "iPhone 16 Pro Max" "iPhone 17 Pro Max" "iPad Pro 13-inch (M4)" "iPad Pro 13-inch (M5)"; do
             echo "── $pajisja"
             tipi=$(xcrun simctl list devicetypes | grep -F "$pajisja (" \
                    | sed -E 's/.*\((com\.apple\.CoreSimulator\.SimDeviceType\.[^)]*)\).*/\1/' | head -1)
@@ -216,6 +220,10 @@ jobs:
               --batteryLevel 100 --cellularMode active --cellularBars 4 --wifiBars 3
             xcrun simctl install "$udid" "$APP_PATH" || { echo "   ⚠️  install"; continue; }
             xcrun simctl privacy "$udid" grant all "$BUNDLE_ID" 2>/dev/null
+            # 🎬 Videoja për shqyrtuesin (porta-dorezimi e kërkon): e gjithë rrjedha,
+            #    nisja → seanca me kompjuterin demo. SIGINT e mbyll .mov-in si duhet.
+            xcrun simctl io "$udid" recordVideo --codec=h264 --force "pamjet/$emri.mov" &
+            rec=$!; sleep 3
             # 1 — ekrani i parë: fusha e ID-së
             xcrun simctl launch "$udid" "$BUNDLE_ID"; sleep 20
             xcrun simctl io "$udid" screenshot "pamjet/$emri-1.png"
@@ -225,6 +233,7 @@ jobs:
             xcrun simctl io "$udid" screenshot "pamjet/$emri-2.png"
             sleep 20
             xcrun simctl io "$udid" screenshot "pamjet/$emri-3.png"
+            kill -INT "$rec"; wait "$rec"
             xcrun simctl shutdown "$udid"
           done
           nr=$(ls pamjet/*.png 2>/dev/null | wc -l | tr -d ' ')
