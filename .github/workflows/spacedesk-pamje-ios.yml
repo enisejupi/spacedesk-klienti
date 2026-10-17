@@ -281,7 +281,23 @@ jobs:
           mkdir -p pamjet
           runtime=$(xcrun simctl list runtimes | grep -oE 'com\.apple\.CoreSimulator\.SimRuntime\.iOS-[0-9-]+' | tail -1)
           URL="rustdesk://${DEMO_ID}?password=${DEMO_PASS}"
-          for pajisja in "iPhone 16 Pro Max" "iPhone 17 Pro Max" "iPad Pro 13-inch (M4)" "iPad Pro 13-inch (M5)"; do
+          # `simctl openurl` nxjerr dialogun e iOS «Open in SpaceDesk?» (xhirimi 39000xxx, 17-10) dhe
+          # simctl s'prek dot. idb e shtyp butonin brenda simulatorit, pa leje accessibility te macOS.
+          brew tap facebook/fb >/dev/null 2>&1; brew install idb-companion >/dev/null 2>&1
+          pip3 install --break-system-packages fb-idb >/dev/null 2>&1 || pip3 install fb-idb >/dev/null 2>&1
+          command -v idb && command -v idb_companion
+          shtyp_open() {
+            sleep 6
+            idb connect "$1" >/dev/null 2>&1 || true
+            xy=$(idb ui describe-all --udid "$1" 2>/dev/null | python3 -c 'import json,sys
+          for e in json.load(sys.stdin):
+              if e.get("AXLabel") == "Open":
+                  f = e["frame"]; print(int(f["x"] + f["width"] / 2), int(f["y"] + f["height"] / 2)); break')
+            echo "   «Open» te: ${xy:-(s'u gjet — koordinatat)}"
+            idb ui tap --udid "$1" ${xy:-293 515} || true
+          }
+          # Pamjet iPad/iPhone 1 u ngarkuan 17-10; tani duhet vetëm videoja e seancës → një pajisje.
+          for pajisja in "iPhone 16 Pro Max"; do
             echo "── $pajisja"
             tipi=$(xcrun simctl list devicetypes | grep -F "$pajisja (" \
                    | sed -E 's/.*\((com\.apple\.CoreSimulator\.SimDeviceType\.[^)]*)\).*/\1/' | head -1)
@@ -302,7 +318,7 @@ jobs:
             xcrun simctl io "$udid" screenshot "pamjet/$emri-1.png"
             # 2, 3 — seanca me kompjuterin demo, nga nisje e ftohtë me URL
             xcrun simctl terminate "$udid" "$BUNDLE_ID"; sleep 2
-            xcrun simctl openurl "$udid" "$URL"; sleep 40
+            xcrun simctl openurl "$udid" "$URL"; shtyp_open "$udid"; sleep 40
             xcrun simctl io "$udid" screenshot "pamjet/$emri-2.png"
             sleep 20
             xcrun simctl io "$udid" screenshot "pamjet/$emri-3.png"
