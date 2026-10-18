@@ -303,8 +303,8 @@ jobs:
             echo "   «Open» te: ${xy:-(nuk u gjet, koordinatat)}"
             idb ui tap --udid "$1" ${xy:-293 515} || true
           }
-          # Pamjet iPad/iPhone 1 u ngarkuan 17-10; tani duhet vetëm videoja e seancës → një pajisje.
-          for pajisja in "iPhone 16 Pro Max"; do
+          # 18-10: pamjet e 17-10 kishin 😵 (para hapit 9 të markës) → iPhone + iPad sërish; videoja vlen nga iPhone-i.
+          for pajisja in "iPhone 16 Pro Max" "iPad Pro 13-inch (M4)" "iPad Pro 13-inch (M5)"; do
             echo "── $pajisja"
             tipi=$(xcrun simctl list devicetypes | grep -F "$pajisja (" \
                    | sed -E 's/.*\((com\.apple\.CoreSimulator\.SimDeviceType\.[^)]*)\).*/\1/' | head -1)
