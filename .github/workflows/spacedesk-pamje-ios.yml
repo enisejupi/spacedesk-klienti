@@ -285,8 +285,10 @@ jobs:
           # simctl s'prek dot. idb e shtyp butonin brenda simulatorit, pa leje accessibility te macOS.
           # 17-10 xhirimi 9: `brew install idb-companion` dështoi dhe, i heshtur nën bash -e, e vrau hapin
           # para çdo pamjeje. Tani dalja duket dhe dështimi kalon te koordinatat (pa idb = pa prekje).
+          # 17-10 xhirimi 10: Homebrew i ri refuzon formulat e një tap-i «untrusted» pa `brew trust`.
           brew tap facebook/fb 2>&1 | tail -2 || true
-          brew install idb-companion 2>&1 | tail -5 || true
+          brew trust facebook/fb 2>&1 | tail -2 || true
+          brew install facebook/fb/idb-companion 2>&1 | tail -5 || true
           # 17-10 xhirimi 8: `pip3 install` ra në heshtje dhe `command -v idb` nën bash -e e vrau hapin.
           pipx install fb-idb 2>&1 | tail -2 || python3 -m pip install --user --break-system-packages fb-idb 2>&1 | tail -2 || true
           export PATH="$HOME/.local/bin:$(python3 -m site --user-base)/bin:$PATH"
@@ -298,7 +300,7 @@ jobs:
           for e in json.load(sys.stdin):
               if e.get("AXLabel") == "Open":
                   f = e["frame"]; print(int(f["x"] + f["width"] / 2), int(f["y"] + f["height"] / 2)); break' 2>/dev/null || true)
-            echo "   «Open» te: ${xy:-(s'u gjet — koordinatat)}"
+            echo "   «Open» te: ${xy:-(nuk u gjet, koordinatat)}"
             idb ui tap --udid "$1" ${xy:-293 515} || true
           }
           # Pamjet iPad/iPhone 1 u ngarkuan 17-10; tani duhet vetëm videoja e seancës → një pajisje.
